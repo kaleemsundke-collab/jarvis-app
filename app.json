@@ -27,6 +27,12 @@
           "speechRecognitionPermission": "Jarvis turns your speech into commands."
         }
       ]
-    ]
+    ],
+    "owner": "kaleemsundkes-team",
+    "extra": {
+      "eas": {
+        "projectId": "c5740f47-1541-4a75-8b3c-04d2a8f351d4"
+      }
+    }
   }
 }
