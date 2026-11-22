@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Jarvis",
+    "slug": "jarvis-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#02121c",
+    "android": {
+      "package": "com.kaleem.jarvis",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "INTERNET",
+        "CALL_PHONE",
+        "ACCESS_FINE_LOCATION",
+        "MODIFY_AUDIO_SETTINGS",
+        "WAKE_LOCK"
+      ],
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Jarvis listens for the wake word and your commands.",
+          "speechRecognitionPermission": "Jarvis turns your speech into commands."
+        }
+      ]
+    ]
+  }
+}
