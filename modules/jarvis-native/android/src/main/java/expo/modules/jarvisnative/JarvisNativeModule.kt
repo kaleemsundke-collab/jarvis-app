@@ -24,6 +24,14 @@ class JarvisNativeModule : Module() {
 
     Events("onNotification")
 
+    Function("muteBeep") { muted: Boolean ->
+      try {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, if (muted) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE, 0)
+        true
+      } catch (e: Exception) { false }
+    }
+
     OnCreate {
       JarvisBus.listener = { app, title, text -> sendEvent("onNotification", mapOf("app" to app, "title" to title, "text" to text)) }
     }

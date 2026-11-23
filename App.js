@@ -29,7 +29,15 @@ function launch(pkg) {
 }
 
 const WAKE = /\b(jarvis|jarvish|jervis|travis|service)\b/i;
-const say = (t) => Speech.speak(t, { language: 'en-GB', pitch: 0.8, rate: 0.95 });
+let beepMuted = false;
+let wakeActive = false;
+const beep = (mute) => { if (beepMuted === mute) return; beepMuted = mute; try { Native && Native.muteBeep(mute); } catch (e) { /* ignore */ } };
+// The recogniser plays a "ding" every time it restarts. Mute the music stream while only listening, unmute to speak.
+const say = (t) => {
+  if (beepMuted) beep(false);
+  const back = () => { if (wakeActive) setTimeout(() => beep(true), 400); };
+  Speech.speak(t, { language: 'en-GB', pitch: 0.8, rate: 0.95, onDone: back, onStopped: back, onError: back });
+};
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
 let readNotifs = false;
@@ -185,9 +193,16 @@ export default function App() {
     web.current.injectJavaScript('window.__sre&&window.__sre(' + curId.current + ',' + JSON.stringify(type) + ',' + JSON.stringify(data || {}) + ');true;');
   };
 
+  const lastBegin = useRef(0);
+  const gap = useRef(700);
   const beginWake = () => {
     if (!wakeOn.current) return;
     mode.current = 'wake';
+    const now = Date.now();
+    gap.current = now - lastBegin.current < 2500 ? Math.min(gap.current * 1.6, 5000) : 700;
+    lastBegin.current = now;
+    if (!Speech.isSpeakingAsync) beep(true);
+    beep(true);
     try { ExpoSpeechRecognitionModule.start({ lang: 'en-IN', interimResults: true, continuous: true, maxAlternatives: 1, contextualStrings: ['Jarvis'] }); }
     catch (e) { setStatus('Speech error: ' + (e && e.message ? e.message : 'unknown')); }
   };
@@ -224,7 +239,7 @@ export default function App() {
   });
   useSpeechRecognitionEvent('end', () => {
     if (mode.current === 'web') { send('end'); mode.current = 'idle'; }
-    if (wakeOn.current) setTimeout(beginWake, 700);
+    if (wakeOn.current) setTimeout(beginWake, gap.current);
   });
 
   const onMessage = async (ev) => {
@@ -235,7 +250,7 @@ export default function App() {
         const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
         if (!p.granted) { send('error', { error: 'not-allowed' }); send('end'); setStatus('Microphone permission denied'); return; }
         try { ExpoSpeechRecognitionModule.abort(); } catch (e) { /* ignore */ }
-        mode.current = 'web';
+        mode.current = 'web'; beep(false);
         setTimeout(() => {
           try { ExpoSpeechRecognitionModule.start({ lang: m.lang || 'en-IN', interimResults: true, continuous: !!m.continuous, maxAlternatives: 1, contextualStrings: ['Jarvis'] }); }
           catch (e) { mode.current = 'idle'; send('error', { error: 'audio-capture' }); send('end'); }
@@ -247,14 +262,14 @@ export default function App() {
 
   const toggleWake = async () => {
     if (wakeOn.current) {
-      wakeOn.current = false; setWake(false); setStatus('Wake word off'); mode.current = 'idle';
+      wakeOn.current = false; wakeActive = false; beep(false); setWake(false); setStatus('Wake word off'); mode.current = 'idle';
       try { ExpoSpeechRecognitionModule.abort(); } catch (e) { /* ignore */ }
       try { Native && Native.stopListenService(); } catch (e) { /* ignore */ }
       return;
     }
     const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!p.granted) { setStatus('Microphone permission needed'); return; }
-    wakeOn.current = true; setWake(true); setStatus('Listening for "Jarvis"...');
+    wakeOn.current = true; wakeActive = true; setWake(true); setStatus('Listening for "Jarvis"...');
     try { Native && Native.startListenService(); } catch (e) { /* ignore */ }
     beginWake();
   };
@@ -320,6 +335,9 @@ export default function App() {
         injectedJavaScriptBeforeContentLoaded={SHIM}
         onMessage={onMessage}
         javaScriptEnabled
+        androidLayerType="hardware"
+        cacheEnabled
+        overScrollMode="never"
         domStorageEnabled
         geolocationEnabled
         allowsInlineMediaPlayback

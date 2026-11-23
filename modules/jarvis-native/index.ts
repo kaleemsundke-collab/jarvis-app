@@ -12,6 +12,7 @@ type Native = {
   notificationAccessEnabled(): boolean;
   openNotificationSettings(): boolean;
   startCall(number: string): string;
+  muteBeep(muted: boolean): boolean;
   addListener(name: string, cb: (e: any) => void): { remove(): void };
 };
 
