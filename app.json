@@ -2,7 +2,7 @@
   "expo": {
     "name": "Jarvis",
     "slug": "jarvis-app",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#02121c",
@@ -24,7 +24,10 @@
         "POST_NOTIFICATIONS",
         "READ_CONTACTS",
         "READ_CALENDAR",
-        "READ_CALL_LOG"
+        "READ_CALL_LOG",
+        "SCHEDULE_EXACT_ALARM",
+        "VIBRATE",
+        "USE_FULL_SCREEN_INTENT"
       ],
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {

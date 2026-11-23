@@ -45,6 +45,54 @@ const alertUser = (title, text) => {
 };
 const needsYou = (t) => /\?\s*$/.test(t) || /\b(i have a (doubt|question)|need your (input|approval|decision|confirmation)|please confirm|shall i|should i)\b/i.test(t);
 const projectDone = (t) => /\b(project|website|app|build|task|report)\b.*\b(complete|completed|finished|done|ready)\b/i.test(t) || /\b(finished|completed)\b.*\b(project|website|app|build|task|report)\b/i.test(t);
+
+// ---- reminders, briefing, messages ----
+const msgBuf = [];
+const parseWhen = (str) => {
+  let m = /\bin\s+(\d+|an?|one|two|three|five|ten|fifteen|twenty|thirty)\s*(second|minute|min|hour|hr)s?\b/.exec(str);
+  const W = { a: 1, an: 1, one: 1, two: 2, three: 3, five: 5, ten: 10, fifteen: 15, twenty: 20, thirty: 30 };
+  if (m) { const n = W[m[1]] || parseInt(m[1], 10); const u = m[2][0]; return Date.now() + n * (u === 's' ? 1000 : u === 'm' ? 60000 : 3600000); }
+  m = /\bat\s+(\d{1,2})(?::|\s)?(\d{2})?\s*(a\.?m\.?|p\.?m\.?)?\b/.exec(str);
+  if (m) {
+    let h = parseInt(m[1], 10); const mi = m[2] ? parseInt(m[2], 10) : 0; const ap = (m[3] || '').replace(/\./g, '');
+    if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0;
+    if (h > 23 || mi > 59) return null;
+    const d = new Date(); d.setHours(h, mi, 0, 0);
+    if (!ap && d.getTime() < Date.now() - 1000) { d.setHours(h + 12 > 23 ? h : h + 12, mi, 0, 0); }
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  return null;
+};
+let alarmId = 100;
+const fmtTime = (ms) => new Date(ms).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+async function briefing() {
+  const parts = [];
+  const h = new Date().getHours();
+  parts.push((h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening') + ', sir.');
+  try {
+    const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000, maximumAge: 600000 }));
+    const { latitude: la, longitude: lo } = pos.coords;
+    const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=' + la + '&longitude=' + lo + '&current=temperature_2m,weather_code&daily=temperature_2m_max,precipitation_probability_max&timezone=auto&forecast_days=1');
+    const j = await r.json();
+    const code = j.current.weather_code;
+    const sky = code === 0 ? 'clear' : code < 4 ? 'partly cloudy' : code < 50 ? 'foggy' : code < 70 ? 'rainy' : code < 80 ? 'snowy' : code < 90 ? 'showery' : 'stormy';
+    parts.push('It is ' + Math.round(j.current.temperature_2m) + ' degrees and ' + sky + ', with a high of ' + Math.round(j.daily.temperature_2m_max[0]) + ' and a ' + j.daily.precipitation_probability_max[0] + ' percent chance of rain.');
+  } catch (e) { parts.push('I could not reach the weather today.'); }
+  try {
+    const p = await Calendar.getCalendarPermissionsAsync();
+    if (p.granted) {
+      const cals = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      const a = new Date(); const b = new Date(); b.setHours(23, 59, 59, 999);
+      const ev = (await Calendar.getEventsAsync(cals.map((c) => c.id), a, b)).sort((x, y) => new Date(x.startDate) - new Date(y.startDate));
+      parts.push(ev.length ? 'You have ' + ev.length + ' event' + (ev.length > 1 ? 's' : '') + ' today: ' + ev.slice(0, 4).map((e) => e.title + ' at ' + fmtTime(new Date(e.startDate).getTime())).join(', ') + '.' : 'Your calendar is clear for the rest of today.');
+    }
+  } catch (e) { /* ignore */ }
+  try { const lv = Math.round((await Battery.getBatteryLevelAsync()) * 100); if (lv >= 0) parts.push('Battery is at ' + lv + ' percent.'); } catch (e) { /* ignore */ }
+  if (voicemail.length) parts.push('You have ' + voicemail.length + ' voicemail message' + (voicemail.length > 1 ? 's' : '') + '.');
+  if (msgBuf.length) parts.push('You have ' + msgBuf.length + ' unread message' + (msgBuf.length > 1 ? 's' : '') + '. Say read my messages.');
+  return parts.join(' ');
+}
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
 let readNotifs = false;
@@ -135,7 +183,7 @@ async function nativeCommand(raw) {
     if (r === 'ok') return 'Calling ' + c.name + ', sir.';
     Linking.openURL('tel:' + c.number); return 'Opening the dialler for ' + c.name + ', sir.';
   }
-  m = /^(?:text|sms|message)\s+([a-z][a-z .'-]{1,40}?)\s+(?:saying|say|that says)\s+(.+)$/.exec(t);
+  m = /^(?:text|sms|message|reply to)\s+([a-z][a-z .'-]{1,40}?)\s+(?:saying|say|that says)\s+(.+)$/.exec(t);
   if (m) {
     const c = await findContact(m[1].trim());
     if (c.err) return c.err;
@@ -153,6 +201,47 @@ async function nativeCommand(raw) {
   if (/^(play|read|check) (my )?(voicemail|voice mail|messages from callers)$/.test(t)) {
     if (!voicemail.length) return 'You have no voicemail, sir.';
     const v = voicemail.splice(0); return 'You have ' + v.length + ' message' + (v.length > 1 ? 's' : '') + '. ' + v.map((m) => m.from + ' says: ' + m.text).join('. ');
+  }
+  // ---- reminders / timers / alarms ----
+  m = /^(?:remind me|set (?:a )?reminder)\s+(.+)$/.exec(t);
+  if (m && Native) {
+    const body = m[1]; const when = parseWhen(body);
+    if (!when) return 'When shall I remind you, sir? Say, for example, remind me at six pm to call Rahul.';
+    const what = body.replace(/\b(in\s+\S+\s+\S+|at\s+\d{1,2}(?::|\s)?(?:\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\b/, '').replace(/^\s*(to|about)\s+/, '').replace(/\s+/g, ' ').replace(/^to\s+/, '').trim() || 'your reminder';
+    Native.scheduleAlert(++alarmId, when, 'Jarvis reminder', 'Sir, a reminder: ' + what);
+    return 'Reminder set for ' + fmtTime(when) + ': ' + what + '.';
+  }
+  m = /^(?:set (?:a )?(?:timer|alarm)(?: for)?|wake me)\s*(.*)$/.exec(t);
+  if (m && Native) {
+    const when = parseWhen(/^(in|at)\b/.test(m[1]) ? m[1] : (/\d+\s*(second|minute|min|hour|hr)/.test(m[1]) ? 'in ' + m[1] : 'at ' + m[1]));
+    if (!when) return 'For how long, or at what time, sir?';
+    Native.scheduleAlert(++alarmId, when, 'Jarvis alarm', 'Sir, your timer or alarm has gone off.');
+    return 'Done. I will ring you at ' + fmtTime(when) + '.';
+  }
+  // ---- phone controls ----
+  if (/^(?:turn on|switch on|enable)(?: the)? (?:flash ?light|torch|flash)$|^(?:flash ?light|torch) on$/.test(t)) return Native && Native.torch(true) ? 'Flashlight on, sir.' : 'I could not switch the flashlight on, sir.';
+  if (/^(?:turn off|switch off|disable)(?: the)? (?:flash ?light|torch|flash)$|^(?:flash ?light|torch) off$/.test(t)) return Native && Native.torch(false) ? 'Flashlight off, sir.' : 'I could not switch it off, sir.';
+  m = /^(?:set )?volume (?:to )?(\d{1,3})(?: percent)?$/.exec(t);
+  if (m && Native) { Native.volume('set', Math.min(100, parseInt(m[1], 10))); return 'Volume set to ' + Math.min(100, parseInt(m[1], 10)) + ' percent, sir.'; }
+  if (Native && /^(?:volume up|turn (?:it |the volume )?up|louder|increase (?:the )?volume)$/.test(t)) { Native.volume('up', 0); return 'Louder, sir.'; }
+  if (Native && /^(?:volume down|turn (?:it |the volume )?down|quieter|decrease (?:the )?volume)$/.test(t)) { Native.volume('down', 0); return 'Quieter, sir.'; }
+  if (Native && /^(?:max(?:imum)? volume|full volume)$/.test(t)) { Native.volume('max', 0); return 'Maximum volume, sir.'; }
+  if (Native && /^(?:mute (?:the )?(?:volume|phone|sound))$/.test(t)) { Native.volume('mute', 0); return 'Muted, sir.'; }
+  if (Native && /^(?:find my phone|where is my phone|ring my phone)$/.test(t)) { Native.findPhone(true); return 'Ringing at full volume, sir. Say stop ringing to silence it.'; }
+  if (Native && /^(?:stop ringing|stop the alarm|i found it|found it)$/.test(t)) { Native.findPhone(false); return 'Silenced, sir.'; }
+  m = /^(?:turn |switch )?(?:on |off )?(wi-?fi|bluetooth|brightness|airplane mode|flight mode|mobile data|data)(?: settings| on| off)?$|^(?:open )?(wi-?fi|bluetooth|brightness|airplane mode) settings$/.exec(t);
+  if (m && Native) {
+    const w = (m[1] || m[2]).replace('-', '');
+    Native.openPanel(w === 'wifi' ? 'wifi' : w === 'bluetooth' ? 'bluetooth' : w === 'brightness' ? 'brightness' : /airplane|flight/.test(w) ? 'airplane' : 'data');
+    return 'Opening the ' + w + ' controls, sir. Android does not let me flip that switch myself, so you only need one tap.';
+  }
+  // ---- briefing & messages ----
+  if (/^(?:good (?:morning|afternoon|evening)(?: jarvis)?|(?:brief me|briefing|daily briefing|morning briefing|what.?s my day|my day))$/.test(t)) return await briefing();
+  if (/^(?:read|check|any|do i have any)(?: my)?(?: new| unread)?(?: whatsapp| telegram| sms)?(?: messages?| texts?)?$/.test(t) && /messag|text|whatsapp|telegram|sms/.test(t)) {
+    if (Native && !Native.notificationAccessEnabled()) { try { Native.openNotificationSettings(); } catch (e) { /* ignore */ } return 'Please switch Jarvis on in Notification access, sir, so I can see your messages. Then ask again.'; }
+    if (!msgBuf.length) return 'No new messages, sir.';
+    const list = msgBuf.splice(0).slice(-6);
+    return 'You have ' + list.length + ' message' + (list.length > 1 ? 's' : '') + '. ' + list.map((x) => x.from + (x.app ? ' on ' + x.app : '') + ' says: ' + x.text).join('. ') + '. Say reply to, then a name, then saying, and your message, if you wish to answer by text.';
   }
   if (/^(test alert|alert me|ring me)$/.test(t)) { alertUser('Jarvis', 'Sir, this is a test alert. I will ring you like this when I need you.'); return 'Test alert sent, sir.'; }
   if (/^(go )?back$/.test(t)) return phone('back');
@@ -323,6 +412,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    let last = '';
+    const go = async () => {
+      const d = new Date(); const key = d.toDateString();
+      if (d.getHours() >= 5 && d.getHours() < 11 && last !== key) { last = key; try { say(await briefing()); } catch (e) { /* ignore */ } }
+    };
+    const t0 = setTimeout(go, 6000);
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') go(); });
+    return () => { clearTimeout(t0); try { sub.remove(); } catch (e) { /* ignore */ } };
+  }, []);
+
+  useEffect(() => {
     if (Platform.OS === 'android') {
       const P = PermissionsAndroid.PERMISSIONS;
       PermissionsAndroid.requestMultiple([P.CAMERA, P.RECORD_AUDIO, P.ACCESS_FINE_LOCATION, P.ANSWER_PHONE_CALLS, P.READ_PHONE_STATE, P.SEND_SMS, P.POST_NOTIFICATIONS, P.CALL_PHONE, P.READ_CONTACTS, P.READ_CALENDAR, P.READ_CALL_LOG].filter(Boolean)).catch(() => {});
@@ -339,6 +439,10 @@ export default function App() {
           const ttl = String(n.title || '');
           if (/messag|sms/i.test(String(n.app || '') + String(n.pkg || '')) && Object.keys(textedNames).some((k) => ttl.includes(k))) {
             voicemail.push({ from: ttl, text: String(n.text || '').slice(0, 300) });
+          }
+          if (/whatsapp|telegram|messag|sms|mms|signal/i.test(String(n.pkg || '') + String(n.app || '')) && n.title && n.text) {
+            msgBuf.push({ from: ttl, app: /whatsapp/i.test(String(n.pkg || '') + String(n.app || '')) ? 'WhatsApp' : /telegram/i.test(String(n.pkg || '') + String(n.app || '')) ? 'Telegram' : '', text: String(n.text).slice(0, 200) });
+            if (msgBuf.length > 30) msgBuf.shift();
           }
           if (!readNotifs) return;
           const body = String(n.text || '').slice(0, 140);

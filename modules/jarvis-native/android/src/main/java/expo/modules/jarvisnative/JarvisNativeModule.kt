@@ -18,6 +18,8 @@ class JarvisNativeModule : Module() {
 
   private fun has(p: String) = ctx.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
+  private var finder: android.media.Ringtone? = null
+
   @SuppressLint("MissingPermission")
   override fun definition() = ModuleDefinition {
     Name("JarvisNative")
@@ -25,25 +27,69 @@ class JarvisNativeModule : Module() {
     Events("onNotification", "onCall")
 
     Function("alertMe") { title: String, text: String ->
+      val ctx = appContext.reactContext ?: return@Function false
+      JarvisAlerts.post(ctx, title, text)
+    }
+    Function("scheduleAlert") { id: Int, whenMs: Double, title: String, text: String ->
       try {
         val ctx = appContext.reactContext ?: return@Function false
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
-        if (Build.VERSION.SDK_INT >= 26) {
-          val ch = android.app.NotificationChannel("jarvis_alert", "Jarvis alerts", android.app.NotificationManager.IMPORTANCE_HIGH)
-          ch.enableVibration(true); ch.vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 600)
-          ch.setSound(uri, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
-          nm.createNotificationChannel(ch)
-        }
-        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
-        val pi = android.app.PendingIntent.getActivity(ctx, 0, launch, android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0))
-        val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(ctx, "jarvis_alert") else android.app.Notification.Builder(ctx)
-        b.setSmallIcon(ctx.applicationInfo.icon).setContentTitle(title).setContentText(text)
-          .setStyle(android.app.Notification.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(pi)
-          .setCategory(android.app.Notification.CATEGORY_CALL).setFullScreenIntent(pi, true)
-        if (Build.VERSION.SDK_INT < 26) { b.setSound(uri); b.setPriority(android.app.Notification.PRIORITY_MAX) }
-        nm.notify(7001, b.build())
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        val i = Intent(ctx, JarvisAlarmReceiver::class.java).putExtra("title", title).putExtra("text", text).putExtra("id", id)
+        val pi = android.app.PendingIntent.getBroadcast(ctx, id, i, android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0))
+        if (Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, whenMs.toLong(), pi)
+        else am.setExact(android.app.AlarmManager.RTC_WAKEUP, whenMs.toLong(), pi)
         true
+      } catch (e: Exception) { false }
+    }
+    Function("torch") { on: Boolean ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function false
+        val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        cm.setTorchMode(cm.cameraIdList[0], on); true
+      } catch (e: Exception) { false }
+    }
+    Function("volume") { mode: String, level: Int ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function -1
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val st = android.media.AudioManager.STREAM_MUSIC
+        val max = am.getStreamMaxVolume(st)
+        when (mode) {
+          "set" -> am.setStreamVolume(st, (max * level / 100.0).toInt().coerceIn(0, max), 0)
+          "up" -> am.adjustStreamVolume(st, android.media.AudioManager.ADJUST_RAISE, 0)
+          "down" -> am.adjustStreamVolume(st, android.media.AudioManager.ADJUST_LOWER, 0)
+          "mute" -> am.setStreamVolume(st, 0, 0)
+          "max" -> am.setStreamVolume(st, max, 0)
+        }
+        am.getStreamVolume(st) * 100 / max
+      } catch (e: Exception) { -1 }
+    }
+    Function("findPhone") { on: Boolean ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function false
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        if (on) {
+          am.setStreamVolume(android.media.AudioManager.STREAM_ALARM, am.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM), 0)
+          val r = android.media.RingtoneManager.getRingtone(ctx, android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM))
+          if (Build.VERSION.SDK_INT >= 28) r.isLooping = true
+          r.audioAttributes = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM).build()
+          finder?.stop(); finder = r; r.play()
+        } else { finder?.stop(); finder = null }
+        true
+      } catch (e: Exception) { false }
+    }
+    Function("openPanel") { name: String ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function false
+        val action = when (name) {
+          "wifi" -> if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
+          "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+          "brightness" -> Settings.ACTION_DISPLAY_SETTINGS
+          "airplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+          "data" -> Settings.ACTION_DATA_ROAMING_SETTINGS
+          else -> Settings.ACTION_SETTINGS
+        }
+        ctx.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
       } catch (e: Exception) { false }
     }
     Function("lastCallType") { number: String ->

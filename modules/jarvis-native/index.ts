@@ -15,6 +15,11 @@ type Native = {
   muteBeep(muted: boolean): boolean;
   lastCallType(number: string): number;
   alertMe(title: string, text: string): boolean;
+  scheduleAlert(id: number, whenMs: number, title: string, text: string): boolean;
+  torch(on: boolean): boolean;
+  volume(mode: string, level: number): number;
+  findPhone(on: boolean): boolean;
+  openPanel(name: string): boolean;
   addListener(name: string, cb: (e: any) => void): { remove(): void };
 };
 

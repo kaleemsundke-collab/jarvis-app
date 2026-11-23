@@ -9,7 +9,10 @@
   <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
   <uses-permission android:name="android.permission.VIBRATE" />
   <uses-permission android:name="android.permission.READ_CALL_LOG" />
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <application>
+    <receiver android:name=".JarvisAlarmReceiver" android:exported="false" />
     <receiver android:name=".JarvisCallReceiver" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.PHONE_STATE" />
