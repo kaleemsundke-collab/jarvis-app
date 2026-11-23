@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Linking, PermissionsAndroid, Platform, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
@@ -7,7 +7,6 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
 const HOME = 'https://jarvis-kaleem.vercel.app';
-const WAKE = /\b(jarvis|jarvish|service|travis|jervis)\b/i;
 
 // Friendly name -> Android package. Opened with a launcher intent, no tap needed.
 const APPS = {
@@ -25,9 +24,9 @@ function launch(pkg) {
   return Linking.openURL('intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=' + pkg + ';end');
 }
 
-// Returns a spoken reply if it handled the command natively, otherwise null (-> hand to the web Jarvis brain).
-async function nativeCommand(text) {
-  const t = text.toLowerCase().trim();
+// Handles commands that only the native app can do. Returns a spoken reply, or null to let the web Jarvis answer.
+async function nativeCommand(raw) {
+  const t = raw.toLowerCase().replace(/^(?:hey |ok |okay )?jarvis[,.:!?]?\s*/, '').trim();
   let m = /^(?:please )?(?:open|launch|start)\s+(.+)$/.exec(t);
   if (m) {
     const name = m[1].replace(/^the\s+/, '').replace(/\s+app$/, '').trim();
@@ -39,75 +38,76 @@ async function nativeCommand(text) {
   if (m) { Linking.openURL('tel:' + m[1].replace(/[\s-]/g, '')); return 'Dialling, sir.'; }
   m = /^(?:navigate|directions|take me) to\s+(.+)$/.exec(t);
   if (m) { Linking.openURL('geo:0,0?q=' + encodeURIComponent(m[1])); return 'Navigating to ' + m[1] + ', sir.'; }
-  m = /^(?:play|search youtube for)\s+(.+?)(?: on youtube)?$/.exec(t);
-  if (m) { Linking.openURL('https://www.youtube.com/results?search_query=' + encodeURIComponent(m[1])); return 'Searching YouTube, sir.'; }
-  m = /^(?:search|google)\s+(?:for\s+)?(.+)$/.exec(t);
-  if (m) { Linking.openURL('https://www.google.com/search?q=' + encodeURIComponent(m[1])); return 'Searching, sir.'; }
   m = /^whatsapp\s+(\+?\d{8,15})\s+(.+)$/.exec(t);
   if (m) { Linking.openURL('https://wa.me/' + m[1].replace('+', '') + '?text=' + encodeURIComponent(m[2])); return 'Message prepared in WhatsApp, sir. Tap send.'; }
   return null;
 }
 
-// Types the command into the web Jarvis chat and presses send.
-const injectChat = (text) => `(function(){try{
-  var t=${JSON.stringify(text)};
-  var el=document.querySelector('textarea')||document.querySelector('input[type=text]');
-  if(!el){return;}
-  var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto,'value').set.call(el,t);
-  el.dispatchEvent(new Event('input',{bubbles:true}));
-  var b=document.querySelector('[data-act="send"]')||document.querySelector('button[type=submit]');
-  if(b){b.click();}else{el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));}
-}catch(e){}})();true;`;
+// Android WebView has no SpeechRecognition, so the Jarvis website's microphone never worked in the app.
+// This shim, injected before the page loads, provides it and forwards to the phone's native recogniser.
+const SHIM = `(function(){
+  if (window.__nativeSR) return; window.__nativeSR = true;
+  var live = {}, cnt = 0, cur = null;
+  function post(o){ try{ window.ReactNativeWebView.postMessage(JSON.stringify(o)); }catch(e){} }
+  function SR(){ this.lang='en-IN'; this.continuous=false; this.interimResults=false; this.maxAlternatives=1; this._id=++cnt; live[this._id]=this; }
+  SR.prototype.start=function(){ post({t:'start',id:this._id,lang:this.lang,continuous:!!this.continuous}); };
+  SR.prototype.stop=function(){ post({t:'stop',id:this._id}); };
+  SR.prototype.abort=function(){ post({t:'abort',id:this._id}); };
+  SR.prototype.addEventListener=function(n,f){ this['on'+n]=f; };
+  SR.prototype.removeEventListener=function(){};
+  window.SpeechRecognition = window.webkitSpeechRecognition = SR;
+  window.__sre = function(id, type, d){
+    var r = live[id]; if(!r) return;
+    var h = r['on'+type]; if(typeof h!=='function') return;
+    if (type==='result'){
+      var alt = [{transcript:d.text, confidence:1}]; alt.isFinal = !!d.final;
+      h.call(r, {resultIndex:0, results:[alt]});
+    } else if (type==='error'){ h.call(r, {error:d.error}); }
+    else { h.call(r, {}); }
+  };
+})();true;`;
 
 export default function App() {
   useKeepAwake();
   const web = useRef(null);
-  const [listening, setListening] = useState(false);
-  const [status, setStatus] = useState('Wake word off');
-  const wantOn = useRef(false);
-  const awaiting = useRef(false);
-  const lastFinal = useRef('');
+  const curId = useRef(null);
+  const handled = useRef(false);
+  const [status, setStatus] = useState('');
 
-  const begin = useCallback(() => {
-    try {
-      ExpoSpeechRecognitionModule.start({ lang: 'en-IN', interimResults: true, continuous: true, maxAlternatives: 1, contextualStrings: ['Jarvis'] });
-    } catch (e) { setStatus('Speech error: ' + (e && e.message ? e.message : 'unknown')); }
-  }, []);
+  const send = (type, data) => {
+    if (!web.current || curId.current == null) return;
+    web.current.injectJavaScript('window.__sre&&window.__sre(' + curId.current + ',' + JSON.stringify(type) + ',' + JSON.stringify(data || {}) + ');true;');
+  };
 
-  useSpeechRecognitionEvent('end', () => {
-    if (wantOn.current) setTimeout(begin, 400);
-  });
-  useSpeechRecognitionEvent('error', (e) => {
-    if (e.error === 'not-allowed') { wantOn.current = false; setListening(false); setStatus('Microphone permission denied'); return; }
-    if (wantOn.current) setTimeout(begin, 1200);
-  });
+  useSpeechRecognitionEvent('start', () => send('start'));
   useSpeechRecognitionEvent('result', async (e) => {
     const text = (e.results && e.results[0] && e.results[0].transcript) || '';
-    if (!e.isFinal || !text || text === lastFinal.current) return;
-    lastFinal.current = text;
-    const wake = WAKE.exec(text);
-    let cmd = '';
-    if (wake) { cmd = text.slice(wake.index + wake[0].length).replace(/^[\s,.:!-]+/, ''); }
-    else if (awaiting.current) { cmd = text; }
-    else return;
-    if (!cmd) { awaiting.current = true; setStatus('Yes, sir?'); Speech.speak('Yes, sir?', { language: 'en-GB', pitch: 0.8 }); return; }
-    awaiting.current = false;
-    setStatus('Heard: ' + cmd);
-    const reply = await nativeCommand(cmd);
-    if (reply) { Speech.speak(reply, { language: 'en-GB', pitch: 0.8 }); }
-    else if (web.current) { web.current.injectJavaScript(injectChat(cmd)); }
-  });
-
-  const toggle = async () => {
-    if (listening) {
-      wantOn.current = false; setListening(false); setStatus('Wake word off');
-      try { ExpoSpeechRecognitionModule.stop(); } catch (e) { /* ignore */ }
-      return;
+    if (!text) return;
+    if (e.isFinal && !handled.current) {
+      const reply = await nativeCommand(text);
+      if (reply) {
+        handled.current = true;
+        setStatus('Heard: ' + text);
+        Speech.speak(reply, { language: 'en-GB', pitch: 0.8 });
+        return;
+      }
     }
-    const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!p.granted) { setStatus('Microphone permission needed'); return; }
-    wantOn.current = true; setListening(true); setStatus('Listening for "Jarvis"...'); begin();
+    if (!handled.current) send('result', { text, final: !!e.isFinal });
+  });
+  useSpeechRecognitionEvent('error', (e) => { send('error', { error: e.error || 'unknown' }); });
+  useSpeechRecognitionEvent('end', () => { send('end'); handled.current = false; });
+
+  const onMessage = async (ev) => {
+    let m; try { m = JSON.parse(ev.nativeEvent.data); } catch (e) { return; }
+    if (m.t === 'start') {
+      curId.current = m.id; handled.current = false;
+      try {
+        const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        if (!p.granted) { send('error', { error: 'not-allowed' }); send('end'); setStatus('Microphone permission denied'); return; }
+        ExpoSpeechRecognitionModule.start({ lang: m.lang || 'en-IN', interimResults: true, continuous: !!m.continuous, maxAlternatives: 1, contextualStrings: ['Jarvis'] });
+      } catch (e) { send('error', { error: 'audio-capture' }); send('end'); setStatus('Speech error: ' + (e && e.message ? e.message : 'unknown')); }
+    } else if (m.t === 'stop') { try { ExpoSpeechRecognitionModule.stop(); } catch (e) { /* ignore */ } }
+    else if (m.t === 'abort') { try { ExpoSpeechRecognitionModule.abort(); } catch (e) { /* ignore */ } }
   };
 
   useEffect(() => {
@@ -123,6 +123,8 @@ export default function App() {
         ref={web}
         source={{ uri: HOME }}
         style={s.web}
+        injectedJavaScriptBeforeContentLoaded={SHIM}
+        onMessage={onMessage}
         javaScriptEnabled
         domStorageEnabled
         geolocationEnabled
@@ -132,15 +134,11 @@ export default function App() {
         setSupportMultipleWindows={false}
         originWhitelist={['https://*', 'http://*', 'tel:*', 'mailto:*', 'intent:*', 'whatsapp:*', 'sms:*']}
         onShouldStartLoadWithRequest={(r) => {
-          if (/^https?:\/\/(jarvis-kaleem\.vercel\.app|[^/]*\.(googleapis|open-meteo|openrouter)\.[a-z]+)/.test(r.url) || r.url === 'about:blank') return true;
           if (/^(tel:|sms:|mailto:|whatsapp:|intent:)/.test(r.url) || /^https:\/\/(wa\.me|api\.whatsapp\.com)/.test(r.url)) { Linking.openURL(r.url).catch(() => {}); return false; }
           return true;
         }}
       />
-      <TouchableOpacity style={[s.btn, listening && s.on]} onPress={toggle}>
-        <Text style={s.t}>{listening ? 'Wake word ON' : 'Wake word'}</Text>
-      </TouchableOpacity>
-      <Text style={s.st}>{status}</Text>
+      {status ? <Text style={s.st}>{status}</Text> : null}
     </View>
   );
 }
@@ -148,8 +146,5 @@ export default function App() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#02121c', paddingTop: 28 },
   web: { flex: 1, backgroundColor: '#02121c' },
-  btn: { position: 'absolute', left: 12, top: 40, backgroundColor: 'rgba(6,20,29,.92)', borderColor: '#1fd6ff', borderWidth: 1, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, zIndex: 10 },
-  on: { backgroundColor: '#1fd6ff' },
-  t: { color: '#dff8ff', fontWeight: '600' },
-  st: { position: 'absolute', left: 12, top: 84, color: '#9fe9ff', fontSize: 12, zIndex: 10, maxWidth: 240 },
+  st: { position: 'absolute', left: 12, bottom: 12, color: '#9fe9ff', fontSize: 12, backgroundColor: 'rgba(6,20,29,.9)', padding: 6, borderRadius: 8 },
 });
