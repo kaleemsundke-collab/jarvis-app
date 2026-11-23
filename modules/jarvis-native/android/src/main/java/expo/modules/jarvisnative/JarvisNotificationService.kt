@@ -5,6 +5,8 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
 object JarvisBus {
+  @Volatile var callListener: ((String, String) -> Unit)? = null
+  fun call(state: String, number: String) { callListener?.invoke(state, number) }
   @Volatile var listener: ((String, String, String) -> Unit)? = null
   fun emit(app: String, title: String, text: String) { listener?.invoke(app, title, text) }
 }

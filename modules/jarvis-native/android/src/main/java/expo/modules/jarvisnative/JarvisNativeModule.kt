@@ -22,7 +22,7 @@ class JarvisNativeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("JarvisNative")
 
-    Events("onNotification")
+    Events("onNotification", "onCall")
 
     Function("muteBeep") { muted: Boolean ->
       try {
@@ -33,10 +33,11 @@ class JarvisNativeModule : Module() {
     }
 
     OnCreate {
+      JarvisBus.callListener = { state, number -> sendEvent("onCall", mapOf("state" to state, "number" to number)) }
       JarvisBus.listener = { app, title, text -> sendEvent("onNotification", mapOf("app" to app, "title" to title, "text" to text)) }
     }
 
-    OnDestroy { JarvisBus.listener = null }
+    OnDestroy { JarvisBus.listener = null; JarvisBus.callListener = null }
 
     Function("notificationAccessEnabled") {
       val s = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: ""

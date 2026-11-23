@@ -41,6 +41,22 @@ const say = (t) => {
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
 let readNotifs = false;
+let lastCaller = null; // { number, name } while a call is ringing
+let contactCache = null;
+const tail10 = (n) => String(n || '').replace(/\D/g, '').slice(-10);
+async function nameForNumber(num) {
+  try {
+    if (!contactCache) {
+      const p = await Contacts.getPermissionsAsync();
+      if (!p.granted) return null;
+      const r = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers], pageSize: 2000 });
+      contactCache = r.data || [];
+    }
+    const t = tail10(num);
+    const hit = contactCache.find((c) => (c.phoneNumbers || []).some((p) => tail10(p.number) === t));
+    return hit ? hit.name : null;
+  } catch (e) { return null; }
+}
 async function findContact(name) {
   try {
     const p = await Contacts.requestPermissionsAsync();
@@ -114,6 +130,14 @@ async function nativeCommand(raw) {
     if (c.err) return c.err;
     pendingSms = { number: c.number, text: m[2] };
     return 'I will text ' + c.name + ': ' + m[2] + '. Say send to confirm, or cancel.';
+  }
+  if (/^(i.?m busy|i am busy|busy|reject and text|decline and text|text busy)$/.test(t)) {
+    if (!lastCaller || !lastCaller.number) return 'There is no call to answer for you, sir.';
+    if (!Native) return 'My native controls are not available, sir.';
+    const who = lastCaller; lastCaller = null;
+    Native.endCall();
+    const r = Native.sendSms(who.number, 'Kaleem is busy right now and will call you back as soon as he can. - Jarvis, his assistant');
+    return r === 'ok' ? 'I declined the call and told ' + (who.name || 'the caller') + ' that you are busy, sir.' : 'I declined the call, sir, but could not send the text. Please allow the SMS permission.';
   }
   if (/^(go )?back$/.test(t)) return phone('back');
   if (/^(go )?home$|^home screen$/.test(t)) return phone('home');
@@ -276,7 +300,7 @@ export default function App() {
   useEffect(() => {
     if (Platform.OS === 'android') {
       const P = PermissionsAndroid.PERMISSIONS;
-      PermissionsAndroid.requestMultiple([P.CAMERA, P.RECORD_AUDIO, P.ACCESS_FINE_LOCATION, P.ANSWER_PHONE_CALLS, P.READ_PHONE_STATE, P.SEND_SMS, P.POST_NOTIFICATIONS, P.CALL_PHONE, P.READ_CONTACTS, P.READ_CALENDAR].filter(Boolean)).catch(() => {});
+      PermissionsAndroid.requestMultiple([P.CAMERA, P.RECORD_AUDIO, P.ACCESS_FINE_LOCATION, P.ANSWER_PHONE_CALLS, P.READ_PHONE_STATE, P.SEND_SMS, P.POST_NOTIFICATIONS, P.CALL_PHONE, P.READ_CONTACTS, P.READ_CALENDAR, P.READ_CALL_LOG].filter(Boolean)).catch(() => {});
     }
   }, []);
 
@@ -290,6 +314,23 @@ export default function App() {
           if (!readNotifs) return;
           const body = String(n.text || '').slice(0, 140);
           say('New ' + n.app + ' notification' + (n.title ? ' from ' + n.title : '') + (body ? '. ' + body : '') + '.');
+        });
+      }
+    } catch (e) { /* ignore */ }
+    let callSub = null, ringTimer = null;
+    try {
+      if (Native && Native.addListener) {
+        callSub = Native.addListener('onCall', async (c) => {
+          if (c.state === 'RINGING') {
+            if (c.number) {
+              if (lastCaller && lastCaller.number === c.number) return;
+              const name = await nameForNumber(c.number);
+              lastCaller = { number: c.number, name };
+              say('Sir, you have a call from ' + (name || String(c.number).split('').join(' ')) + '. Say answer, reject, or I am busy.');
+            } else if (!lastCaller) {
+              ringTimer = setTimeout(() => { if (!lastCaller) say('Sir, you have an incoming call.'); }, 1200);
+            }
+          } else { lastCaller = null; if (ringTimer) clearTimeout(ringTimer); }
         });
       }
     } catch (e) { /* ignore */ }
@@ -321,7 +362,7 @@ export default function App() {
     };
     const id = setInterval(tick, 60000);
     setTimeout(tick, 8000);
-    return () => { clearInterval(id); try { sub && sub.remove(); } catch (e) { /* ignore */ } };
+    return () => { clearInterval(id); try { sub && sub.remove(); callSub && callSub.remove(); } catch (e) { /* ignore */ } };
   }, []);
 
   return (
