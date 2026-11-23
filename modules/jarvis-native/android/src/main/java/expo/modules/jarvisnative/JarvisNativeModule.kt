@@ -24,6 +24,28 @@ class JarvisNativeModule : Module() {
 
     Events("onNotification", "onCall")
 
+    Function("alertMe") { title: String, text: String ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function false
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+        if (Build.VERSION.SDK_INT >= 26) {
+          val ch = android.app.NotificationChannel("jarvis_alert", "Jarvis alerts", android.app.NotificationManager.IMPORTANCE_HIGH)
+          ch.enableVibration(true); ch.vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 600)
+          ch.setSound(uri, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
+          nm.createNotificationChannel(ch)
+        }
+        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+        val pi = android.app.PendingIntent.getActivity(ctx, 0, launch, android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0))
+        val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(ctx, "jarvis_alert") else android.app.Notification.Builder(ctx)
+        b.setSmallIcon(ctx.applicationInfo.icon).setContentTitle(title).setContentText(text)
+          .setStyle(android.app.Notification.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(pi)
+          .setCategory(android.app.Notification.CATEGORY_CALL).setFullScreenIntent(pi, true)
+        if (Build.VERSION.SDK_INT < 26) { b.setSound(uri); b.setPriority(android.app.Notification.PRIORITY_MAX) }
+        nm.notify(7001, b.build())
+        true
+      } catch (e: Exception) { false }
+    }
     Function("lastCallType") { number: String ->
       try {
         val ctx = appContext.reactContext ?: return@Function -1

@@ -14,6 +14,7 @@ type Native = {
   startCall(number: string): string;
   muteBeep(muted: boolean): boolean;
   lastCallType(number: string): number;
+  alertMe(title: string, text: string): boolean;
   addListener(name: string, cb: (e: any) => void): { remove(): void };
 };
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Linking, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Linking, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
@@ -38,6 +38,13 @@ const say = (t) => {
   const back = () => { if (wakeActive) setTimeout(() => beep(true), 400); };
   Speech.speak(t, { language: 'en-GB', pitch: 0.8, rate: 0.95, onDone: back, onStopped: back, onError: back });
 };
+// Jarvis taking the initiative: ring + notification + spoken alert
+const alertUser = (title, text) => {
+  try { Native && Native.alertMe(title, text); } catch (e) { /* ignore */ }
+  say(text);
+};
+const needsYou = (t) => /\?\s*$/.test(t) || /\b(i have a (doubt|question)|need your (input|approval|decision|confirmation)|please confirm|shall i|should i)\b/i.test(t);
+const projectDone = (t) => /\b(project|website|app|build|task|report)\b.*\b(complete|completed|finished|done|ready)\b/i.test(t) || /\b(finished|completed)\b.*\b(project|website|app|build|task|report)\b/i.test(t);
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
 let readNotifs = false;
@@ -147,6 +154,7 @@ async function nativeCommand(raw) {
     if (!voicemail.length) return 'You have no voicemail, sir.';
     const v = voicemail.splice(0); return 'You have ' + v.length + ' message' + (v.length > 1 ? 's' : '') + '. ' + v.map((m) => m.from + ' says: ' + m.text).join('. ');
   }
+  if (/^(test alert|alert me|ring me)$/.test(t)) { alertUser('Jarvis', 'Sir, this is a test alert. I will ring you like this when I need you.'); return 'Test alert sent, sir.'; }
   if (/^(go )?back$/.test(t)) return phone('back');
   if (/^(go )?home$|^home screen$/.test(t)) return phone('home');
   if (/^(recent apps|recents|app switcher)$/.test(t)) return phone('recents');
@@ -178,6 +186,7 @@ async function nativeCommand(raw) {
 const SHIM = `(function(){
   if (window.__nativeSR) return; window.__nativeSR = true;
   var live = {}, cnt = 0, cur = null;
+  try{ var ss=window.speechSynthesis, os=ss&&ss.speak; if(os){ ss.speak=function(u){ try{ window.ReactNativeWebView.postMessage(JSON.stringify({t:'spoke',text:String(u&&u.text||'')})); }catch(e){} return os.apply(this,arguments); }; } }catch(e){}
   function post(o){ try{ window.ReactNativeWebView.postMessage(JSON.stringify(o)); }catch(e){} }
   function SR(){ this.lang='en-IN'; this.continuous=false; this.interimResults=false; this.maxAlternatives=1; this._id=++cnt; live[this._id]=this; }
   SR.prototype.start=function(){ post({t:'start',id:this._id,lang:this.lang,continuous:!!this.continuous}); };
@@ -275,6 +284,14 @@ export default function App() {
 
   const onMessage = async (ev) => {
     let m; try { m = JSON.parse(ev.nativeEvent.data); } catch (e) { return; }
+    if (m.t === 'spoke') {
+      const tx = m.text || '';
+      if (AppState.currentState !== 'active') {
+        if (projectDone(tx)) alertUser('Jarvis: work complete', tx.slice(0, 200));
+        else if (needsYou(tx)) alertUser('Jarvis needs you', tx.slice(0, 200));
+      }
+      return;
+    }
     if (m.t === 'start') {
       curId.current = m.id;
       try {
