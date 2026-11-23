@@ -15,6 +15,7 @@
     "expo-status-bar": "*",
     "react": "*",
     "react-native": "*",
-    "react-native-webview": "*"
+    "react-native-webview": "*",
+    "expo-modules-core": "*"
   }
 }
