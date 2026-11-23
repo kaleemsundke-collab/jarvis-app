@@ -201,7 +201,6 @@ export default function App() {
     const now = Date.now();
     gap.current = now - lastBegin.current < 2500 ? Math.min(gap.current * 1.6, 5000) : 700;
     lastBegin.current = now;
-    if (!Speech.isSpeakingAsync) beep(true);
     beep(true);
     try { ExpoSpeechRecognitionModule.start({ lang: 'en-IN', interimResults: true, continuous: true, maxAlternatives: 1, contextualStrings: ['Jarvis'] }); }
     catch (e) { setStatus('Speech error: ' + (e && e.message ? e.message : 'unknown')); }
