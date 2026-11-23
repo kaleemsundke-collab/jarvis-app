@@ -16,6 +16,9 @@
     "react": "*",
     "react-native": "*",
     "react-native-webview": "*",
-    "expo-modules-core": "*"
+    "expo-modules-core": "*",
+    "expo-battery": "*",
+    "expo-calendar": "*",
+    "expo-contacts": "*"
   }
 }

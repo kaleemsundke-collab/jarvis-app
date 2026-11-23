@@ -5,6 +5,7 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.CALL_PHONE" />
   <application>
     <service
       android:name=".JarvisAccessibilityService"
@@ -15,6 +16,15 @@
         <action android:name="android.accessibilityservice.AccessibilityService" />
       </intent-filter>
       <meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_a11y" />
+    </service>
+    <service
+      android:name=".JarvisNotificationService"
+      android:exported="true"
+      android:label="Jarvis"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
     </service>
     <service
       android:name=".ListenService"

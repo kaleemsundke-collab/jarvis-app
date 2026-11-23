@@ -9,6 +9,10 @@ type Native = {
   accessibilityEnabled(): boolean;
   openAccessibilitySettings(): boolean;
   phoneAction(kind: string, arg: string): string;
+  notificationAccessEnabled(): boolean;
+  openNotificationSettings(): boolean;
+  startCall(number: string): string;
+  addListener(name: string, cb: (e: any) => void): { remove(): void };
 };
 
 let mod: Native | null = null;

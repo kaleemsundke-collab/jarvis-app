@@ -6,6 +6,9 @@ import * as Speech from 'expo-speech';
 import { useKeepAwake } from 'expo-keep-awake';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import Native from './modules/jarvis-native';
+import * as Contacts from 'expo-contacts';
+import * as Battery from 'expo-battery';
+import * as Calendar from 'expo-calendar';
 
 const HOME = 'https://jarvis-kaleem.vercel.app';
 
@@ -29,6 +32,17 @@ const WAKE = /\b(jarvis|jarvish|jervis|travis|service)\b/i;
 const say = (t) => Speech.speak(t, { language: 'en-GB', pitch: 0.8, rate: 0.95 });
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
+let readNotifs = false;
+async function findContact(name) {
+  try {
+    const p = await Contacts.requestPermissionsAsync();
+    if (!p.granted) return { err: 'I need the contacts permission, sir.' };
+    const r = await Contacts.getContactsAsync({ name, fields: [Contacts.Fields.PhoneNumbers], pageSize: 5 });
+    const hit = (r.data || []).find((c) => c.phoneNumbers && c.phoneNumbers.length);
+    if (!hit) return { err: 'I could not find ' + name + ' in your contacts, sir.' };
+    return { name: hit.name, number: hit.phoneNumbers[0].number.replace(/[^\d+]/g, '') };
+  } catch (e) { return { err: 'I could not read your contacts, sir.' }; }
+}
 let pendingSms = null; // { number, text } waiting for the spoken word "send"
 
 const NEED_A11Y = 'Please switch Jarvis on in Accessibility settings, sir. I am opening them now.';
@@ -70,6 +84,28 @@ async function nativeCommand(raw) {
   if (m) {
     const number = digits(m[1]).replace(/[^\d+]/g, '');
     if (number.length >= 8) { pendingSms = { number, text: m[2] }; return 'I will text ' + number.split('').join(' ') + ': ' + m[2] + '. Say send to confirm, or cancel.'; }
+  }
+  m = /^(?:read|announce)(?: my| all)? notifications?(?: aloud)?$|^notifications? on$/.exec(t);
+  if (m) {
+    if (Native && !Native.notificationAccessEnabled()) { try { Native.openNotificationSettings(); } catch (e) { /* ignore */ } return 'Please switch Jarvis on in Notification access, sir. I am opening it now. Then say it again.'; }
+    readNotifs = true; return 'I will read your notifications aloud, sir.';
+  }
+  if (/^(?:stop reading|stop announcing|mute)(?: my)?(?: notifications?)?$|^notifications? off$/.test(t)) { readNotifs = false; return 'Notifications muted, sir.'; }
+  m = /^(?:call|dial|phone|ring)\s+([a-z][a-z .'-]{1,40})$/.exec(t);
+  if (m) {
+    const c = await findContact(m[1].trim());
+    if (c.err) return c.err;
+    if (!Native) { Linking.openURL('tel:' + c.number); return 'Opening the dialler for ' + c.name + ', sir.'; }
+    const r = Native.startCall(c.number);
+    if (r === 'ok') return 'Calling ' + c.name + ', sir.';
+    Linking.openURL('tel:' + c.number); return 'Opening the dialler for ' + c.name + ', sir.';
+  }
+  m = /^(?:text|sms|message)\s+([a-z][a-z .'-]{1,40}?)\s+(?:saying|say|that says)\s+(.+)$/.exec(t);
+  if (m) {
+    const c = await findContact(m[1].trim());
+    if (c.err) return c.err;
+    pendingSms = { number: c.number, text: m[2] };
+    return 'I will text ' + c.name + ': ' + m[2] + '. Say send to confirm, or cancel.';
   }
   if (/^(go )?back$/.test(t)) return phone('back');
   if (/^(go )?home$|^home screen$/.test(t)) return phone('home');
@@ -226,8 +262,52 @@ export default function App() {
   useEffect(() => {
     if (Platform.OS === 'android') {
       const P = PermissionsAndroid.PERMISSIONS;
-      PermissionsAndroid.requestMultiple([P.CAMERA, P.RECORD_AUDIO, P.ACCESS_FINE_LOCATION, P.ANSWER_PHONE_CALLS, P.READ_PHONE_STATE, P.SEND_SMS, P.POST_NOTIFICATIONS].filter(Boolean)).catch(() => {});
+      PermissionsAndroid.requestMultiple([P.CAMERA, P.RECORD_AUDIO, P.ACCESS_FINE_LOCATION, P.ANSWER_PHONE_CALLS, P.READ_PHONE_STATE, P.SEND_SMS, P.POST_NOTIFICATIONS, P.CALL_PHONE, P.READ_CONTACTS, P.READ_CALENDAR].filter(Boolean)).catch(() => {});
     }
+  }, []);
+
+  // Proactive Jarvis: speaks up on its own (low battery, upcoming calendar events) and reads notifications aloud.
+  useEffect(() => {
+    const said = new Set();
+    let sub = null;
+    try {
+      if (Native && Native.addListener) {
+        sub = Native.addListener('onNotification', (n) => {
+          if (!readNotifs) return;
+          const body = String(n.text || '').slice(0, 140);
+          say('New ' + n.app + ' notification' + (n.title ? ' from ' + n.title : '') + (body ? '. ' + body : '') + '.');
+        });
+      }
+    } catch (e) { /* ignore */ }
+    const tick = async () => {
+      try {
+        const lvl = await Battery.getBatteryLevelAsync();
+        const st = await Battery.getBatteryStateAsync();
+        const pct = Math.round(lvl * 100);
+        if (st !== Battery.BatteryState.CHARGING && st !== Battery.BatteryState.FULL && pct > 0) {
+          const band = pct <= 5 ? 5 : pct <= 10 ? 10 : pct <= 15 ? 15 : pct <= 20 ? 20 : 0;
+          if (band && !said.has('bat' + band)) { said.add('bat' + band); say('Sir, your battery is at ' + pct + ' percent. You may want to charge the phone.'); }
+        } else { ['bat5', 'bat10', 'bat15', 'bat20'].forEach((k) => said.delete(k)); }
+      } catch (e) { /* ignore */ }
+      try {
+        const perm = await Calendar.getCalendarPermissionsAsync();
+        if (perm.granted) {
+          const cals = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+          const now = new Date(), soon = new Date(now.getTime() + 15 * 60000);
+          const evs = await Calendar.getEventsAsync(cals.map((c) => c.id), now, soon);
+          evs.forEach((ev) => {
+            const key = 'ev' + ev.id + ev.startDate;
+            if (said.has(key)) return;
+            said.add(key);
+            const mins = Math.max(1, Math.round((new Date(ev.startDate).getTime() - now.getTime()) / 60000));
+            say('Sir, ' + ev.title + ' starts in ' + mins + ' minute' + (mins > 1 ? 's' : '') + '.');
+          });
+        }
+      } catch (e) { /* ignore */ }
+    };
+    const id = setInterval(tick, 60000);
+    setTimeout(tick, 8000);
+    return () => { clearInterval(id); try { sub && sub.remove(); } catch (e) { /* ignore */ } };
   }, []);
 
   return (

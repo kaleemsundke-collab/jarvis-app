@@ -22,6 +22,36 @@ class JarvisNativeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("JarvisNative")
 
+    Events("onNotification")
+
+    OnCreate {
+      JarvisBus.listener = { app, title, text -> sendEvent("onNotification", mapOf("app" to app, "title" to title, "text" to text)) }
+    }
+
+    OnDestroy { JarvisBus.listener = null }
+
+    Function("notificationAccessEnabled") {
+      val s = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: ""
+      s.contains(ctx.packageName)
+    }
+
+    Function("openNotificationSettings") {
+      val i = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(i)
+      true
+    }
+
+    Function("startCall") { number: String ->
+      if (!has(Manifest.permission.CALL_PHONE)) return@Function "permission"
+      try {
+        val i = Intent(Intent.ACTION_CALL, android.net.Uri.parse("tel:" + android.net.Uri.encode(number)))
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(i)
+        "ok"
+      } catch (e: Exception) { "failed" }
+    }
+
     Function("startListenService") {
       val i = Intent(ctx, ListenService::class.java)
       if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
