@@ -24,6 +24,17 @@ class JarvisNativeModule : Module() {
 
     Events("onNotification", "onCall")
 
+    Function("lastCallType") { number: String ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function -1
+        val c = ctx.contentResolver.query(android.provider.CallLog.Calls.CONTENT_URI,
+          arrayOf(android.provider.CallLog.Calls.NUMBER, android.provider.CallLog.Calls.TYPE),
+          null, null, android.provider.CallLog.Calls.DATE + " DESC LIMIT 1")
+        var t = -1
+        c?.use { if (it.moveToFirst()) { val n = it.getString(0) ?: ""; if (n.takeLast(10) == number.takeLast(10)) t = it.getInt(1) } }
+        t
+      } catch (e: Exception) { -1 }
+    }
     Function("muteBeep") { muted: Boolean ->
       try {
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager

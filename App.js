@@ -41,6 +41,10 @@ const say = (t) => {
 const NUMWORDS = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', oh: '0' };
 const digits = (str) => str.toLowerCase().split(/\s+/).map((w) => (NUMWORDS[w] !== undefined ? NUMWORDS[w] : w)).join('');
 let readNotifs = false;
+let voicemail = []; // messages left by callers who replied to the busy text
+const texted = {};
+const textedNames = {};
+let ringed = null, wasOffhook = false;
 let lastCaller = null; // { number, name } while a call is ringing
 let contactCache = null;
 const tail10 = (n) => String(n || '').replace(/\D/g, '').slice(-10);
@@ -138,6 +142,10 @@ async function nativeCommand(raw) {
     Native.endCall();
     const r = Native.sendSms(who.number, 'Kaleem is busy right now and will call you back as soon as he can. - Jarvis, his assistant');
     return r === 'ok' ? 'I declined the call and told ' + (who.name || 'the caller') + ' that you are busy, sir.' : 'I declined the call, sir, but could not send the text. Please allow the SMS permission.';
+  }
+  if (/^(play|read|check) (my )?(voicemail|voice mail|messages from callers)$/.test(t)) {
+    if (!voicemail.length) return 'You have no voicemail, sir.';
+    const v = voicemail.splice(0); return 'You have ' + v.length + ' message' + (v.length > 1 ? 's' : '') + '. ' + v.map((m) => m.from + ' says: ' + m.text).join('. ');
   }
   if (/^(go )?back$/.test(t)) return phone('back');
   if (/^(go )?home$|^home screen$/.test(t)) return phone('home');
@@ -311,6 +319,10 @@ export default function App() {
     try {
       if (Native && Native.addListener) {
         sub = Native.addListener('onNotification', (n) => {
+          const ttl = String(n.title || '');
+          if (/messag|sms/i.test(String(n.app || '') + String(n.pkg || '')) && Object.keys(textedNames).some((k) => ttl.includes(k))) {
+            voicemail.push({ from: ttl, text: String(n.text || '').slice(0, 300) });
+          }
           if (!readNotifs) return;
           const body = String(n.text || '').slice(0, 140);
           say('New ' + n.app + ' notification' + (n.title ? ' from ' + n.title : '') + (body ? '. ' + body : '') + '.');
@@ -325,12 +337,30 @@ export default function App() {
             if (c.number) {
               if (lastCaller && lastCaller.number === c.number) return;
               const name = await nameForNumber(c.number);
-              lastCaller = { number: c.number, name };
-              say('Sir, you have a call from ' + (name || String(c.number).split('').join(' ')) + '. Say answer, reject, or I am busy.');
+              lastCaller = { number: c.number, name }; ringed = lastCaller; wasOffhook = false;
+              say('Sir, you have a call from ' + (name || String(c.number).split('').join(' ')) + '. Say answer or reject.');
             } else if (!lastCaller) {
               ringTimer = setTimeout(() => { if (!lastCaller) say('Sir, you have an incoming call.'); }, 1200);
             }
-          } else { lastCaller = null; if (ringTimer) clearTimeout(ringTimer); }
+          } else if (c.state === 'OFFHOOK') { wasOffhook = true; }
+          else {
+            const r = ringed; ringed = null; const answered = wasOffhook; wasOffhook = false;
+            lastCaller = null; if (ringTimer) clearTimeout(ringTimer);
+            if (r && r.number && !answered) {
+              // IDLE after ringing without answering: text only if YOU declined (call-log type 5)
+              setTimeout(() => {
+                try {
+                  const ty = Native.lastCallType(r.number);
+                  const last = texted[tail10(r.number)] || 0;
+                  if (ty === 5 && Date.now() - last > 600000) {
+                    texted[tail10(r.number)] = Date.now(); textedNames[r.name || tail10(r.number)] = 1;
+                    Native.sendSms(r.number, 'Kaleem is busy right now and will call you back as soon as he can. You may reply to this text with your message. - Jarvis, his assistant');
+                    say('I told ' + (r.name || 'the caller') + ' that you are busy, sir.');
+                  }
+                } catch (e) { /* ignore */ }
+              }, 1500);
+            }
+          }
         });
       }
     } catch (e) { /* ignore */ }
