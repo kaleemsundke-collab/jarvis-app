@@ -126,6 +126,7 @@ async function findContact(name) {
     return { name: hit.name, number: hit.phoneNumbers[0].number.replace(/[^\d+]/g, '') };
   } catch (e) { return { err: 'I could not read your contacts, sir.' }; }
 }
+let pendingReply = null; // { name, text, app } reply through a chat app's notification
 let pendingSms = null; // { number, text } waiting for the spoken word "send"
 
 const NEED_A11Y = 'Please switch Jarvis on in Accessibility settings, sir. I am opening them now.';
@@ -144,6 +145,19 @@ function phone(kind, arg) {
 async function nativeCommand(raw) {
   const t = raw.toLowerCase().replace(/^(?:hey |ok |okay )?jarvis[,.:!?]?\s*/, '').replace(/[.!?]+$/, '').replace(/^(?:please |can you |could you |would you |give me |show me |tell me )+/, '').trim();
   let m;
+  if (pendingReply) {
+    if (/^(send|yes|confirm|go ahead|send it)$/.test(t)) {
+      const p = pendingReply; pendingReply = null;
+      const r = Native ? Native.replyTo(p.name, p.text) : 'none';
+      return r === 'ok' ? 'Replied on ' + p.app + ', sir.' : 'I could not send that reply, sir. The notification may have gone.';
+    }
+    if (/^(cancel|no|stop|don.?t send)/.test(t)) { pendingReply = null; return 'Cancelled, sir.'; }
+  }
+  m = /^reply(?: to)?\s+([a-z][a-z .'-]{1,40}?)\s+(?:saying|say|that says|with)\s+(.+)$/.exec(t);
+  if (m && Native) {
+    const app = Native.canReply(m[1].trim());
+    if (app) { pendingReply = { name: m[1].trim(), text: m[2], app }; return 'I will reply to ' + m[1].trim() + ' on ' + app + ': ' + m[2] + '. Say send to confirm, or cancel.'; }
+  }
   if (pendingSms) {
     if (/^(send|yes|confirm|go ahead|send it)$/.test(t)) {
       const p = pendingSms; pendingSms = null;
@@ -388,7 +402,7 @@ export default function App() {
     const w = WAKE.exec(text);
     let cmd = '';
     if (w) cmd = text.slice(w.index + w[0].length).replace(/^[\s,.:!-]+/, '');
-    else if (awaiting.current || pendingSms) cmd = text;
+    else if (awaiting.current || pendingSms || pendingReply) cmd = text;
     else return;
     if (!cmd) { awaiting.current = true; setStatus('Yes, sir?'); say('Yes, sir?'); return; }
     awaiting.current = false;

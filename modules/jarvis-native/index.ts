@@ -15,6 +15,8 @@ type Native = {
   muteBeep(muted: boolean): boolean;
   lastCallType(number: string): number;
   alertMe(title: string, text: string): boolean;
+  canReply(name: string): string;
+  replyTo(name: string, text: string): string;
   scheduleAlert(id: number, whenMs: number, title: string, text: string): boolean;
   torch(on: boolean): boolean;
   volume(mode: string, level: number): number;

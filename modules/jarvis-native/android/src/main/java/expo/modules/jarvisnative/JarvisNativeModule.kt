@@ -26,6 +26,26 @@ class JarvisNativeModule : Module() {
 
     Events("onNotification", "onCall")
 
+    Function("canReply") { name: String ->
+      val q = name.lowercase().trim()
+      val key = JarvisBus.replies.keys.firstOrNull { it == q } ?: JarvisBus.replies.keys.firstOrNull { q.length > 1 && (it.contains(q) || q.contains(it)) }
+      if (key == null) "" else (JarvisBus.replies[key]?.first ?: "")
+    }
+    Function("replyTo") { name: String, text: String ->
+      try {
+        val ctx = appContext.reactContext ?: return@Function "none"
+        val q = name.lowercase().trim()
+        val key = JarvisBus.replies.keys.firstOrNull { it == q } ?: JarvisBus.replies.keys.firstOrNull { q.length > 1 && (it.contains(q) || q.contains(it)) } ?: return@Function "none"
+        val act = JarvisBus.replies[key]!!.second
+        val ris = act.remoteInputs ?: return@Function "none"
+        val i = Intent().addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+        val b = android.os.Bundle(); b.putCharSequence(ris[0].resultKey, text)
+        android.app.RemoteInput.addResultsToIntent(ris, i, b)
+        act.actionIntent.send(ctx, 0, i)
+        JarvisBus.replies.remove(key)
+        "ok"
+      } catch (e: Exception) { "error" }
+    }
     Function("alertMe") { title: String, text: String ->
       val ctx = appContext.reactContext ?: return@Function false
       JarvisAlerts.post(ctx, title, text)
