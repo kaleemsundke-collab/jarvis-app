@@ -568,7 +568,8 @@ export default function App() {
         injectedJavaScriptBeforeContentLoaded={SHIM}
         onMessage={onMessage}
         javaScriptEnabled
-        androidLayerType="hardware"
+        androidLayerType="none"
+        nestedScrollEnabled
         cacheEnabled
         overScrollMode="never"
         domStorageEnabled
