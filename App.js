@@ -297,7 +297,7 @@ const SHIM = `(function(){
     var raw=window.__rawRaf||window.requestAnimationFrame, n=0, t0=performance.now();
     window.__toast('Measuring for 3 seconds... do not touch the screen');
     (function f(){ n++; if(performance.now()-t0<3000) raw(f); else {
-      var fps=Math.round(n/3), ua=(navigator.userAgent.match(/Chrome\/[0-9.]+/)||['?'])[0], lt=window.__lt||[], mx=lt.length?Math.max.apply(null,lt):0;
+      var fps=Math.round(n/3), ua=(navigator.userAgent.match(/Chrome[/]+[0-9.]+/)||['?'])[0], lt=window.__lt||[], mx=lt.length?Math.max.apply(null,lt):0;
       var anims=0; try{ anims=document.getAnimations().length; }catch(e){}
       window.__toast('DIAG | WebView '+ua+' | frames/sec '+fps+' | page elements '+document.getElementsByTagName('*').length+' | canvases '+document.getElementsByTagName('canvas').length+' | running animations '+anims+' | slow tasks '+lt.length+' (worst '+mx+' ms) | memory '+(performance.memory?Math.round(performance.memory.usedJSHeapSize/1048576)+' MB':'n/a'));
     } })();
