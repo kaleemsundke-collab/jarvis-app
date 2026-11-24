@@ -237,9 +237,9 @@ async function nativeCommand(raw) {
   }
   // ---- briefing & messages ----
   if (/^(?:good (?:morning|afternoon|evening)(?: jarvis)?|(?:brief me|briefing|daily briefing|morning briefing|what.?s my day|my day))$|\bbriefing\b|\bbrief me\b/.test(t)) return await briefing();
-  if (/^(?:read|check|any|do i have any)(?: my)?(?: new| unread)?(?: whatsapp| telegram| sms)?(?: messages?| texts?)?$/.test(t) && /messag|text|whatsapp|telegram|sms/.test(t)) {
+  if (/\b(messages?|texts?|whatsapp|telegram)\b/.test(t) && /\b(read|check|any|old|older|previous|recent|new|unread|what about|do i have)\b/.test(t) && !/\b(saying|say|send)\b/.test(t)) {
     if (Native && !Native.notificationAccessEnabled()) { try { Native.openNotificationSettings(); } catch (e) { /* ignore */ } return 'Please switch Jarvis on in Notification access, sir, so I can see your messages. Then ask again.'; }
-    if (!msgBuf.length) return 'No new messages, sir.';
+    if (!msgBuf.length) return 'No new messages since I started watching, sir. I can only read messages that arrive while Jarvis is running. Older ones are in your message apps.';
     const list = msgBuf.splice(0).slice(-6);
     return 'You have ' + list.length + ' message' + (list.length > 1 ? 's' : '') + '. ' + list.map((x) => x.from + (x.app ? ' on ' + x.app : '') + ' says: ' + x.text).join('. ') + '. Say reply to, then a name, then saying, and your message, if you wish to answer by text.';
   }
@@ -277,7 +277,7 @@ const SHIM = `(function(){
   var live = {}, cnt = 0, cur = null;
   try{ var ss=window.speechSynthesis, os=ss&&ss.speak; if(os){ ss.speak=function(u){ try{ window.ReactNativeWebView.postMessage(JSON.stringify({t:'spoke',text:String(u&&u.text||'')})); }catch(e){} return os.apply(this,arguments); }; } }catch(e){}
 
-  var NAT=/\\b(flash ?light|torch|volume|louder|quieter|mute (the )?(phone|sound|volume)|find my phone|ring my phone|stop ringing|remind me|set (a )?(timer|alarm)|briefing|brief me|good (morning|afternoon|evening)|read my (new |unread )?(messages|texts|whatsapp|notifications)|any new messages|wi-?fi|bluetooth|brightness|airplane mode|voicemail|test alert|reply to|decline (the )?call|reject (the )?call|answer (the )?call|go home|go back|recent apps)\\b|^(call|text) [a-z]/i;
+  var NAT=/\\b(flash ?light|torch|volume|louder|quieter|mute (the )?(phone|sound|volume)|find my phone|ring my phone|stop ringing|remind me|set (a )?(timer|alarm)|briefing|brief me|good (morning|afternoon|evening)|(read|check|any|old|older|previous|recent|new|unread|what about)[a-z ]{0,20}(messages|messgaes|texts|whatsapp)|wi-?fi|bluetooth|brightness|airplane mode|voicemail|test alert|reply to|decline (the )?call|reject (the )?call|answer (the )?call|go home|go back|recent apps)\\b|^(call|text) [a-z]/i;
   try{ var _raf=window.requestAnimationFrame.bind(window), _last=0; window.requestAnimationFrame=function(cb){ return _raf(function(ts){ if(ts-_last<33){ _raf(function(t2){ _last=t2; cb(t2); }); } else { _last=ts; cb(ts); } }); }; }catch(e){}
   try{ document.addEventListener('DOMContentLoaded',function(){ var st=document.createElement('style'); st.textContent='*{box-shadow:none!important;filter:none!important;scroll-behavior:auto!important}'; document.head.appendChild(st); }); }catch(e){}
   window.__jb=0;
