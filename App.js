@@ -278,8 +278,10 @@ const SHIM = `(function(){
   try{ var ss=window.speechSynthesis, os=ss&&ss.speak; if(os){ ss.speak=function(u){ try{ window.ReactNativeWebView.postMessage(JSON.stringify({t:'spoke',text:String(u&&u.text||'')})); }catch(e){} return os.apply(this,arguments); }; } }catch(e){}
 
   var NAT=/\\b(flash ?light|torch|volume|louder|quieter|mute (the )?(phone|sound|volume)|find my phone|ring my phone|stop ringing|remind me|set (a )?(timer|alarm)|briefing|brief me|good (morning|afternoon|evening)|(read|check|any|old|older|previous|recent|new|unread|what about)[a-z ]{0,20}(messages|messgaes|texts|whatsapp)|wi-?fi|bluetooth|brightness|airplane mode|voicemail|test alert|reply to|decline (the )?call|reject (the )?call|answer (the )?call|go home|go back|recent apps)\\b|^(call|text) [a-z]/i;
-  try{ var _raf=window.requestAnimationFrame.bind(window), _last=0; window.requestAnimationFrame=function(cb){ return _raf(function(ts){ if(ts-_last<33){ _raf(function(t2){ _last=t2; cb(t2); }); } else { _last=ts; cb(ts); } }); }; }catch(e){}
-  try{ document.addEventListener('DOMContentLoaded',function(){ var st=document.createElement('style'); st.textContent='*{box-shadow:none!important;filter:none!important;scroll-behavior:auto!important}'; document.head.appendChild(st); }); }catch(e){}
+  window.__lite=true;
+  try{ var _raf=window.requestAnimationFrame.bind(window), _gate=0; window.requestAnimationFrame=function(cb){ return _raf(function w(ts){ var iv=window.__lite?50:0; if(ts===_gate||ts-_gate>=iv){ _gate=ts; cb(ts); } else { _raf(w); } }); }; }catch(e){}
+  window.__setLite=function(on){ window.__lite=!!on; var o=document.getElementById('jlite'); if(o) o.remove(); if(on){ var st=document.createElement('style'); st.id='jlite'; st.textContent='*,*::before,*::after{animation:none!important;transition:none!important;box-shadow:none!important;filter:none!important;text-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;scroll-behavior:auto!important}'; (document.head||document.documentElement).appendChild(st); } };
+  try{ document.addEventListener('DOMContentLoaded',function(){ window.__setLite(window.__lite); }); }catch(e){}
   try{ var _f=window.fetch.bind(window); window.fetch=function(u,o){ var us=String(u&&u.url||u||''); var ai=/generativelanguage\.googleapis\.com|openrouter\.ai/.test(us); var p=_f(u,o); if(!ai) return p; return p.then(function(r){ if(!r.ok){ try{ r.clone().text().then(function(t){ var h=/openrouter/.test(us)?'OpenRouter':'Gemini'; var m=t.replace(/key=[^&\s"']+/g,'key=***').replace(/sk-[A-Za-z0-9_-]+/g,'***').replace(/\s+/g,' ').slice(0,220); window.__toast&&window.__toast('AI error from '+h+' (HTTP '+r.status+'): '+m); }); }catch(e){} } return r; },function(err){ try{ window.__toast&&window.__toast('AI request failed: '+String(err&&err.message||err).slice(0,120)); }catch(e){} throw err; }); }; }catch(e){}
   window.__jb=0;
   window.addEventListener('load',function(){ setTimeout(function(){ try{ window.__toast('Jarvis app 1.7.3 - phone controls active'); }catch(e){} },2000); });
@@ -347,6 +349,7 @@ export default function App() {
   const wakeOn = useRef(false);
   const lastFinal = useRef('');
   const awaiting = useRef(false);
+  const [lite, setLite] = useState(true);
   const [wake, setWake] = useState(false);
   const [status, setStatus] = useState('');
 
@@ -583,6 +586,9 @@ export default function App() {
       <TouchableOpacity style={[s.btn, wake && s.on]} onPress={toggleWake}>
         <Text style={s.t}>{wake ? 'Wake word ON' : 'Wake word'}</Text>
       </TouchableOpacity>
+      <TouchableOpacity style={[s.btn, s.lite, lite && s.on]} onPress={() => { const n = !lite; setLite(n); if (web.current) web.current.injectJavaScript('window.__setLite&&window.__setLite(' + n + ');true;'); }}>
+        <Text style={s.t}>{lite ? 'Smooth: ON' : 'Smooth: OFF'}</Text>
+      </TouchableOpacity>
       {status ? <Text style={s.st}>{status}</Text> : null}
     </View>
   );
@@ -593,6 +599,7 @@ const s = StyleSheet.create({
   web: { flex: 1, backgroundColor: '#02121c' },
   btn: { position: 'absolute', left: 12, top: 40, backgroundColor: 'rgba(6,20,29,.92)', borderColor: '#1fd6ff', borderWidth: 1, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, zIndex: 10 },
   on: { backgroundColor: '#1fd6ff' },
+  lite: { top: 86, paddingVertical: 4, paddingHorizontal: 10 },
   t: { color: '#dff8ff', fontWeight: '600' },
   st: { position: 'absolute', left: 12, bottom: 12, color: '#9fe9ff', fontSize: 12, backgroundColor: 'rgba(6,20,29,.9)', padding: 6, borderRadius: 8, maxWidth: 260 },
 });
