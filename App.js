@@ -281,13 +281,22 @@ const SHIM = `(function(){
   try{ var _raf=window.requestAnimationFrame.bind(window), _last=0; window.requestAnimationFrame=function(cb){ return _raf(function(ts){ if(ts-_last<33){ _raf(function(t2){ _last=t2; cb(t2); }); } else { _last=ts; cb(ts); } }); }; }catch(e){}
   try{ document.addEventListener('DOMContentLoaded',function(){ var st=document.createElement('style'); st.textContent='*{box-shadow:none!important;filter:none!important;scroll-behavior:auto!important}'; document.head.appendChild(st); }); }catch(e){}
   window.__jb=0;
-  function chatEl(){ return document.querySelector('textarea')||document.querySelector('input[type=text]'); }
+  window.addEventListener('load',function(){ setTimeout(function(){ try{ window.__toast('Jarvis app 1.7.3 - phone controls active'); }catch(e){} },2000); });
+  function chatEl(){
+    var q=document.querySelectorAll('textarea,input'), best=null;
+    for(var i=0;i<q.length;i++){ var e=q[i], ph=(e.placeholder||'').toLowerCase(); if(e.type==='hidden'||e.type==='checkbox'||e.type==='radio'||e.offsetParent===null) continue; if(/type|mic|message|ask/.test(ph)) return e; if(!best&&(e.tagName==='TEXTAREA'||e.type==='text'||!e.type)) best=e; }
+    return best;
+  }
   function clearEl(el){ try{ var p=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(p,'value').set.call(el,''); el.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){} }
   function trap(e){
     if(window.__jb) return;
     var el=chatEl(); if(!el) return;
     if(e.type==='keydown'){ if(e.key!=='Enter'||e.shiftKey||e.target!==el) return; }
-    else { var b=e.target&&e.target.closest&&e.target.closest('[data-act="send"],button[type=submit]'); if(!b) return; }
+    else {
+      var tg=e.target; if(!tg||!tg.closest) return; var btn=tg.closest('button,[role=button],[data-act]'); if(!btn) return;
+      var box=el.parentElement&&el.parentElement.parentElement; if(!box||!box.contains(btn)||btn.contains(el)) return;
+      if(/mic|voice|speak/i.test((btn.getAttribute('aria-label')||'')+(btn.id||'')+(btn.className||'')+(btn.getAttribute('data-act')||''))) return;
+    }
     var v=(el.value||'').trim(); if(!v||!NAT.test(v)) return;
     e.preventDefault(); e.stopImmediatePropagation(); clearEl(el);
     window.ReactNativeWebView.postMessage(JSON.stringify({t:'cmd',text:v}));
@@ -318,7 +327,7 @@ const SHIM = `(function(){
 // Types a command into the website chat and presses send (used when the wake word hears a non-native command).
 const injectChat = (text) => `(function(){try{
   var t=${JSON.stringify(text)};
-  var el=document.querySelector('textarea')||document.querySelector('input[type=text]');
+  var el=document.querySelector('input[placeholder*="Type"],textarea[placeholder*="Type"]')||document.querySelector('textarea')||document.querySelector('input[type=text]');
   if(!el){return;}
   var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto,'value').set.call(el,t);
