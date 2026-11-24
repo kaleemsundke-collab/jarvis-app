@@ -142,7 +142,7 @@ function phone(kind, arg) {
 
 // Handles commands that only the native app can do. Returns a spoken reply, or null to let the web Jarvis answer.
 async function nativeCommand(raw) {
-  const t = raw.toLowerCase().replace(/^(?:hey |ok |okay )?jarvis[,.:!?]?\s*/, '').replace(/[.!?]+$/, '').trim();
+  const t = raw.toLowerCase().replace(/^(?:hey |ok |okay )?jarvis[,.:!?]?\s*/, '').replace(/[.!?]+$/, '').replace(/^(?:please |can you |could you |would you |give me |show me |tell me )+/, '').trim();
   let m;
   if (pendingSms) {
     if (/^(send|yes|confirm|go ahead|send it)$/.test(t)) {
@@ -236,7 +236,7 @@ async function nativeCommand(raw) {
     return 'Opening the ' + w + ' controls, sir. Android does not let me flip that switch myself, so you only need one tap.';
   }
   // ---- briefing & messages ----
-  if (/^(?:good (?:morning|afternoon|evening)(?: jarvis)?|(?:brief me|briefing|daily briefing|morning briefing|what.?s my day|my day))$/.test(t)) return await briefing();
+  if (/^(?:good (?:morning|afternoon|evening)(?: jarvis)?|(?:brief me|briefing|daily briefing|morning briefing|what.?s my day|my day))$|\bbriefing\b|\bbrief me\b/.test(t)) return await briefing();
   if (/^(?:read|check|any|do i have any)(?: my)?(?: new| unread)?(?: whatsapp| telegram| sms)?(?: messages?| texts?)?$/.test(t) && /messag|text|whatsapp|telegram|sms/.test(t)) {
     if (Native && !Native.notificationAccessEnabled()) { try { Native.openNotificationSettings(); } catch (e) { /* ignore */ } return 'Please switch Jarvis on in Notification access, sir, so I can see your messages. Then ask again.'; }
     if (!msgBuf.length) return 'No new messages, sir.';
@@ -276,6 +276,23 @@ const SHIM = `(function(){
   if (window.__nativeSR) return; window.__nativeSR = true;
   var live = {}, cnt = 0, cur = null;
   try{ var ss=window.speechSynthesis, os=ss&&ss.speak; if(os){ ss.speak=function(u){ try{ window.ReactNativeWebView.postMessage(JSON.stringify({t:'spoke',text:String(u&&u.text||'')})); }catch(e){} return os.apply(this,arguments); }; } }catch(e){}
+
+  var NAT=/\\b(flash ?light|torch|volume|louder|quieter|mute (the )?(phone|sound|volume)|find my phone|ring my phone|stop ringing|remind me|set (a )?(timer|alarm)|briefing|brief me|good (morning|afternoon|evening)|read my (new |unread )?(messages|texts|whatsapp|notifications)|any new messages|wi-?fi|bluetooth|brightness|airplane mode|voicemail|test alert|reply to|decline (the )?call|reject (the )?call|answer (the )?call|go home|go back|recent apps)\\b|^(call|text) [a-z]/i;
+  window.__jb=0;
+  function chatEl(){ return document.querySelector('textarea')||document.querySelector('input[type=text]'); }
+  function clearEl(el){ try{ var p=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(p,'value').set.call(el,''); el.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){} }
+  function trap(e){
+    if(window.__jb) return;
+    var el=chatEl(); if(!el) return;
+    if(e.type==='keydown'){ if(e.key!=='Enter'||e.shiftKey||e.target!==el) return; }
+    else { var b=e.target&&e.target.closest&&e.target.closest('[data-act="send"],button[type=submit]'); if(!b) return; }
+    var v=(el.value||'').trim(); if(!v||!NAT.test(v)) return;
+    e.preventDefault(); e.stopImmediatePropagation(); clearEl(el);
+    window.ReactNativeWebView.postMessage(JSON.stringify({t:'cmd',text:v}));
+  }
+  document.addEventListener('keydown',trap,true); document.addEventListener('click',trap,true);
+  window.__toast=function(t){ try{ var d=document.createElement('div'); d.textContent=t; d.style.cssText='position:fixed;left:12px;right:12px;bottom:90px;z-index:99999;background:#06222f;color:#7fe8ff;border:1px solid #1fb6d9;border-radius:14px;padding:12px 14px;font:15px sans-serif'; document.body.appendChild(d); setTimeout(function(){d.remove();},6000); }catch(e){} };
+  document.addEventListener('DOMContentLoaded',function(){ var st=document.createElement('style'); st.textContent='*{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;text-shadow:none!important}'; document.head.appendChild(st); });
   function post(o){ try{ window.ReactNativeWebView.postMessage(JSON.stringify(o)); }catch(e){} }
   function SR(){ this.lang='en-IN'; this.continuous=false; this.interimResults=false; this.maxAlternatives=1; this._id=++cnt; live[this._id]=this; }
   SR.prototype.start=function(){ post({t:'start',id:this._id,lang:this.lang,continuous:!!this.continuous}); };
@@ -288,6 +305,7 @@ const SHIM = `(function(){
     var r = live[id]; if(!r) return;
     var h = r['on'+type]; if(typeof h!=='function') return;
     if (type==='result'){
+      if (d.final && NAT.test(d.text||'')) { post({t:'cmd',text:d.text}); var he=r['onend']; if(typeof he==='function') he.call(r,{}); return; }
       var alt = [{transcript:d.text, confidence:1}]; alt.isFinal = !!d.final;
       h.call(r, {resultIndex:0, results:[alt]});
     } else if (type==='error'){ h.call(r, {error:d.error}); }
@@ -303,8 +321,10 @@ const injectChat = (text) => `(function(){try{
   var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto,'value').set.call(el,t);
   el.dispatchEvent(new Event('input',{bubbles:true}));
+  window.__jb=1;
   var b=document.querySelector('[data-act="send"]')||document.querySelector('button[type=submit]');
   if(b){b.click();}else{el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));}
+  setTimeout(function(){window.__jb=0;},400);
 }catch(e){}})();true;`;
 
 export default function App() {
@@ -373,6 +393,13 @@ export default function App() {
 
   const onMessage = async (ev) => {
     let m; try { m = JSON.parse(ev.nativeEvent.data); } catch (e) { return; }
+    if (m.t === 'cmd') {
+      let reply = null;
+      try { reply = await nativeCommand(m.text || ''); } catch (e) { reply = 'Something went wrong with that command, sir.'; }
+      if (reply) { say(reply); if (web.current) web.current.injectJavaScript('window.__toast&&window.__toast(' + JSON.stringify(reply.slice(0, 300)) + ');true;'); }
+      else if (web.current) web.current.injectJavaScript(injectChat(m.text || ''));
+      return;
+    }
     if (m.t === 'spoke') {
       const tx = m.text || '';
       if (AppState.currentState !== 'active') {
