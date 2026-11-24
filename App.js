@@ -278,6 +278,8 @@ const SHIM = `(function(){
   try{ var ss=window.speechSynthesis, os=ss&&ss.speak; if(os){ ss.speak=function(u){ try{ window.ReactNativeWebView.postMessage(JSON.stringify({t:'spoke',text:String(u&&u.text||'')})); }catch(e){} return os.apply(this,arguments); }; } }catch(e){}
 
   var NAT=/\\b(flash ?light|torch|volume|louder|quieter|mute (the )?(phone|sound|volume)|find my phone|ring my phone|stop ringing|remind me|set (a )?(timer|alarm)|briefing|brief me|good (morning|afternoon|evening)|read my (new |unread )?(messages|texts|whatsapp|notifications)|any new messages|wi-?fi|bluetooth|brightness|airplane mode|voicemail|test alert|reply to|decline (the )?call|reject (the )?call|answer (the )?call|go home|go back|recent apps)\\b|^(call|text) [a-z]/i;
+  try{ var _raf=window.requestAnimationFrame.bind(window), _last=0; window.requestAnimationFrame=function(cb){ return _raf(function(ts){ if(ts-_last<33){ _raf(function(t2){ _last=t2; cb(t2); }); } else { _last=ts; cb(ts); } }); }; }catch(e){}
+  try{ document.addEventListener('DOMContentLoaded',function(){ var st=document.createElement('style'); st.textContent='*{box-shadow:none!important;filter:none!important;scroll-behavior:auto!important}'; document.head.appendChild(st); }); }catch(e){}
   window.__jb=0;
   function chatEl(){ return document.querySelector('textarea')||document.querySelector('input[type=text]'); }
   function clearEl(el){ try{ var p=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(p,'value').set.call(el,''); el.dispatchEvent(new Event('input',{bubbles:true})); }catch(e){} }
